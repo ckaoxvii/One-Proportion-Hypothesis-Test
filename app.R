@@ -81,7 +81,8 @@ ui <- page_sidebar(
       ),
       card(
         full_screen = TRUE,
-        card_header("Hypothesis Test Results")
+        card_header("Hypothesis Test Results"),
+        reactableOutput("results_table")
       ),
       card(
         full_screen = TRUE,
