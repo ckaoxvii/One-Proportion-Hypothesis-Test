@@ -86,7 +86,8 @@ ui <- page_sidebar(
       ),
       card(
         full_screen = TRUE,
-        card_header("\\(p\\)-Value Plot")
+        card_header("\\(p\\)-Value Plot"),
+        plotOutput("pvalue_plot")
       )
     )
   )
@@ -95,7 +96,8 @@ ui <- page_sidebar(
 server <- function(input, output, session) {
 
   fmt <- function(x, d = 4) {
-    sprintf(paste0("%.", d, "f"), x)
+    out <- sprintf(paste0("%.", d, "f"), x)
+    sub("^-", "\u2212", out)
   }
 
   fmtp <- function(p) {
@@ -218,7 +220,7 @@ server <- function(input, output, session) {
       alt,
       "two.sided" = 2*pnorm(-abs(z)),
       "greater"   = 1 - pnorm(z),
-      "less"      = pnrom(z)
+      "less"      = pnorm(z)
     )
 
     list(
@@ -234,22 +236,22 @@ server <- function(input, output, session) {
   })
 
   output$hypothesis_summary <- renderUI({
-    req(input$p0, input$alt)
+    cdat <- calc()
 
     alt_text <- switch(
-      input$alt,
-      "two.sided" = paste0("\\(H_a: p \\ne ", input$p0, "\\)"),
-      "greater"   = paste0("\\(H_a: p > ", input$p0, "\\)"),
-      "less"      = paste0("\\(H_a: p < ", input$p0, "\\)")
+      cdat$alt,
+      "two.sided" = paste0("\\(H_a: p \\ne ", fmt(cdat$p0, 4), "\\)"),
+      "greater"   = paste0("\\(H_a: p > ", fmt(cdat$p0, 4), "\\)"),
+      "less"      = paste0("\\(H_a: p < ", fmt(cdat$p0, 4), "\\)")
     )
 
     tagList(
       withMathJax(),
-      tags$p(HTML(paste0("\\(H_0: p = ", input$p0, "\\)"))),
+      tags$p(HTML(paste0("\\(H_0: p = ", fmt(cdat$p0, 4), "\\)"))),
       tags$p(HTML(alt_text)),
-      tags$p(HTML(paste0("\\(p_0 = ", input$p0, "\\)"))),
-      tags$p(HTML(paste0("\\(\\hat{p} = ", input$p_hat, "\\)"))),
-      tags$p(HTML(paste0("\\(n = ", input$n, "\\)")))
+      tags$p(HTML(paste0("\\(p_0 = ", fmt(cdat$p0, 4), "\\)"))),
+      tags$p(HTML(paste0("\\(\\hat{p} = ", fmt(cdat$ph, 4), "\\)"))),
+      tags$p(HTML(paste0("\\(n = ", cdat$n, "\\)")))
     )
   })
 
@@ -281,6 +283,154 @@ server <- function(input, output, session) {
         defaultColDef = colDef(align = 'right')
       )
     )
+  })
+
+  output$pvalue_plot <- renderPlot({
+    cdat <- calc()
+
+    x_grid <- seq(-4.5, 4.5, length.out = 2000)
+
+    curve_df <- tibble(
+      x = x_grid,
+      y = dnorm(x_grid)
+    )
+
+    z_obs <- cdat$z
+    z_abs <- abs(z_obs)
+
+    left_tail  <- curve_df %>% filter(x <= -z_abs)
+    right_tail <- curve_df %>% filter(x >=  z_abs)
+    left_one   <- curve_df %>% filter(x <= z_obs)
+    right_one  <- curve_df %>% filter(x >= z_obs)
+
+    p <- ggplot(curve_df, aes(x, y)) +
+      geom_line(linewidth = 1.2, color = "black") +
+      labs(
+        x = "z",
+        y = "Density"
+      ) +
+      coord_cartesian(xlim = c(-4.5, 4.5), ylim = c(0, 0.42)) +
+      theme_minimal(base_size = 18) +
+      theme(
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.title = element_text(color = "black"),
+        axis.text = element_text(color = "black")
+      )
+
+    if (cdat$alt == "two.sided") {
+
+      left_lab_x  <- max(-3.2, -z_abs - 0.95)
+      right_lab_x <- min( 3.2,  z_abs + 0.95)
+      tail_lab <- paste0("Area = ", formatC(cdat$p_val / 2, format = "f", digits = 4))
+
+      p <- p +
+        geom_area(
+          data = left_tail,
+          aes(x = x, y = y),
+          inherit.aes = FALSE,
+          fill = "#CC3366",
+          alpha = 0.30
+        ) +
+        geom_area(
+          data = right_tail,
+          aes(x = x, y = y),
+          inherit.aes = FALSE,
+          fill = "#CC3366",
+          alpha = 0.30
+        ) +
+        geom_vline(
+          xintercept = c(-z_abs, z_abs),
+          color = "#FF5A36",
+          linewidth = 1.1,
+          linetype = "dashed"
+        ) +
+        annotate(
+          "label",
+          x = left_lab_x,
+          y = 0.06,
+          label = tail_lab,
+          fill = "white",
+          color = "#CC2244",
+          label.size = 0.3,
+          size = 6,
+          alpha = 0.75
+        ) +
+        annotate(
+          "label",
+          x = right_lab_x,
+          y = 0.06,
+          label = tail_lab,
+          fill = "white",
+          color = "#CC2244",
+          label.size = 0.3,
+          size = 6,
+          alpha = 0.75
+        )
+
+    } else if (cdat$alt == "greater") {
+
+      lab_x <- min(3.2, z_obs + 1.0)
+
+      p <- p +
+        geom_area(
+          data = right_one,
+          aes(x = x, y = y),
+          inherit.aes = FALSE,
+          fill = "#CC3366",
+          alpha = 0.30
+        ) +
+        geom_vline(
+          xintercept = z_obs,
+          color = "#FF5A36",
+          linewidth = 1.1,
+          linetype = "dashed"
+        ) +
+        annotate(
+          "label",
+          x = lab_x,
+          y = 0.06,
+          label = paste0("Area = ", formatC(cdat$p_val, format = "f", digits = 4)),
+          fill = "white",
+          color = "#CC2244",
+          label.size = 0.3,
+          size = 6,
+          alpha = 0.75
+        )
+
+    } else {
+
+      lab_x <- max(-3.2, z_obs - 1.0)
+
+      p <- p +
+        geom_area(
+          data = left_one,
+          aes(x = x, y = y),
+          inherit.aes = FALSE,
+          fill = "#CC3366",
+          alpha = 0.30
+        ) +
+        geom_vline(
+          xintercept = z_obs,
+          color = "#FF5A36",
+          linewidth = 1.1,
+          linetype = "dashed"
+        ) +
+        annotate(
+          "label",
+          x = lab_x,
+          y = 0.06,
+          label = paste0("Area = ", formatC(cdat$p_val, format = "f", digits = 4)),
+          fill = "white",
+          color = "#CC2244",
+          label.size = 0.3,
+          size = 6,
+          alpha = 0.75
+        )
+    }
+
+    p
   })
 }
 
